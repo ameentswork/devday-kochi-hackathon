@@ -144,8 +144,93 @@ const DEMO_ENTRIES = [
   },
 ]
 
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i))
+  }
+}
+
+function audioBufferToWavBlob(buffer) {
+  const numChannels = 1
+  const sampleRate = buffer.sampleRate
+  const format = 1
+  const bitDepth = 16
+
+  const channelData = buffer.getChannelData(0)
+  const bytesPerSample = bitDepth / 8
+  const blockAlign = numChannels * bytesPerSample
+  const byteRate = sampleRate * blockAlign
+  const dataSize = channelData.length * bytesPerSample
+  const headerSize = 44
+  const totalSize = headerSize + dataSize
+
+  const arrayBuffer = new ArrayBuffer(totalSize)
+  const view = new DataView(arrayBuffer)
+
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(view, 8, 'WAVE')
+
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, format, true)
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitDepth, true)
+
+  writeString(view, 36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  let offset = 44
+  for (let i = 0; i < channelData.length; i++) {
+    const s = Math.max(-1, Math.min(1, channelData[i]))
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+    offset += 2
+  }
+
+  return new Blob([view], { type: 'audio/wav' })
+}
+
+async function createDemoAudioBlob(durationSeconds = 6) {
+  try {
+    const sampleRate = 44100
+    const AudioCtx =
+      typeof window !== 'undefined'
+        ? window.OfflineAudioContext || window.webkitOfflineAudioContext
+        : null
+    if (!AudioCtx) return null
+
+    const ctx = new AudioCtx(1, sampleRate * durationSeconds, sampleRate)
+    const notes = [261.63, 329.63, 392.0, 523.25]
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      const start = idx * 1.2
+      gain.gain.setValueAtTime(0, start)
+      gain.gain.linearRampToValueAtTime(0.18, start + 0.1)
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 1.1)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(start)
+      osc.stop(start + 1.2)
+    })
+
+    const rendered = await ctx.startRendering()
+    return audioBufferToWavBlob(rendered)
+  } catch {
+    return null
+  }
+}
+
 export async function seedDemoEntries() {
-  for (const demo of DEMO_ENTRIES) {
+  const sampleAudioBlob = await createDemoAudioBlob(6)
+
+  for (let idx = 0; idx < DEMO_ENTRIES.length; idx++) {
+    const demo = DEMO_ENTRIES[idx]
     const now = new Date().toISOString()
     const photos = await Promise.all(
       (demo.photos || []).map(async (p) => ({
@@ -163,6 +248,16 @@ export async function seedDemoEntries() {
           blob: await sceneBlob(demo.illustration.variant),
         }
       : null
+
+    const audio =
+      sampleAudioBlob && (idx === 0 || idx === 1)
+        ? {
+            blob: sampleAudioBlob,
+            type: 'audio/wav',
+            duration: 6,
+          }
+        : null
+
     await addEntry({
       title: demo.title,
       entryDate: demo.entryDate,
@@ -172,6 +267,7 @@ export async function seedDemoEntries() {
       illustration,
       illustrationGens: demo.illustrationGens || 0,
       mood: demo.mood || '',
+      audio,
       createdAt: now,
       updatedAt: now,
     })

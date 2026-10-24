@@ -46,6 +46,13 @@ export async function exportJSON() {
       transcript: e.transcript,
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
+      audio: e.audio?.blob
+        ? {
+            type: e.audio.type,
+            duration: e.audio.duration,
+            dataBase64: await blobToBase64(e.audio.blob),
+          }
+        : null,
       photos: await encodeImages(e.photos),
       illustration: e.illustration
         ? {
@@ -70,6 +77,7 @@ export async function exportText() {
     parts.push('═'.repeat(40))
     parts.push(`${e.mood ? e.mood + ' ' : ''}${e.title || 'Untitled memory'}`)
     parts.push(`${formatDate(e.entryDate)} · ${languageLabel(e.language)}`)
+    if (e.audio) parts.push(`[🎙️ Spoken voice memo: ${e.audio.duration || 0}s]`)
     if (e.photos?.length) parts.push(`[${e.photos.length} photo(s)]`)
     if (e.illustration && !e.photos?.length) parts.push('[AI illustration]')
     parts.push('')

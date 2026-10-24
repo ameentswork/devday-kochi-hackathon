@@ -242,28 +242,18 @@ export function createSpeechSession({
 }) {
   if (!speechSupported) return null
 
+  const matchedLang = getLanguage(lang)
+  // Connect the selected language using the exact BCP-47 locale code (e.g. 'ml-IN', 'en-US')
+  const activeLang = matchedLang ? matchedLang.code : (lang || 'en-US')
+
   let stoppedByUser = false
   let everStarted = false
-  let activeLang = lang || getDefaultLanguage()
-  let triedFallbacks = new Set([activeLang])
   let restartTimeout = null
 
   // Ensure initial seed text preserves trailing boundary
   let finalText = seedText ? seedText.trimEnd() : ''
 
   let rec = null
-
-  function getNextFallback(currentCode) {
-    const langObj = getLanguage(currentCode)
-    if (!langObj?.fallbacks) return null
-    for (const fb of langObj.fallbacks) {
-      if (!triedFallbacks.has(fb)) {
-        triedFallbacks.add(fb)
-        return fb
-      }
-    }
-    return null
-  }
 
   function setupRecognition() {
     if (rec) {
@@ -281,6 +271,7 @@ export function createSpeechSession({
     rec = new SpeechRecognitionImpl()
     rec.continuous = true
     rec.interimResults = true
+    // Ensure selected language is applied directly before recognition starts
     rec.lang = activeLang
 
     rec.onstart = () => {
@@ -292,6 +283,7 @@ export function createSpeechSession({
       let interim = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i]
+        // Preserve original transcript script returned by speech engine - never translate or transliterate
         const text = result[0]?.transcript || ''
         if (result.isFinal) {
           finalText = appendWithSpacing(finalText, text, activeLang)
@@ -304,31 +296,23 @@ export function createSpeechSession({
 
     rec.onerror = (event) => {
       const err = event.error
-      if (err === 'no-speech') {
-        // Natural pauses during multilingual dictation shouldn't kill session or flash fatal error
+      // Aborted operations or natural pauses should never show an error to the user
+      if (err === 'aborted' || err === 'no-speech' || stoppedByUser) {
         return
-      }
-
-      if (err === 'language-not-supported') {
-        const nextVariant = getNextFallback(activeLang)
-        if (nextVariant) {
-          activeLang = nextVariant
-          try {
-            setupRecognition()
-            rec.start()
-            return
-          } catch {
-            // continue to error handler
-          }
-        }
       }
 
       if (FATAL_ERRORS.has(err)) {
         stoppedByUser = true
       }
 
-      const message = ERROR_MESSAGES[err]
-      if (message) onError?.(err, message)
+      const message =
+        err === 'language-not-supported'
+          ? `Speech recognition in ${matchedLang.label} is not supported on this browser engine. You can still type in ${matchedLang.native} and record your voice memo.`
+          : ERROR_MESSAGES[err] || (err !== 'aborted' ? `Speech recognition error: ${err}` : null)
+
+      if (message) {
+        onError?.(err, message)
+      }
     }
 
     rec.onend = () => {
@@ -365,7 +349,13 @@ export function createSpeechSession({
       stoppedByUser = true
       clearTimeout(restartTimeout)
       try {
-        rec.stop()
+        if (rec) {
+          rec.onstart = null
+          rec.onresult = null
+          rec.onerror = null
+          rec.onend = null
+          rec.abort()
+        }
       } catch {
         // not running
       }

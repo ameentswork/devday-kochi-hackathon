@@ -7,6 +7,7 @@ import { useDraft } from '../state/DraftContext'
 import { useToast } from '../components/Toast'
 import { useObjectUrls } from '../components/PhotoStrip'
 import ConfirmDialog from '../components/ConfirmDialog'
+import AudioPlayer from '../components/AudioPlayer'
 
 export default function Detail() {
   const { id } = useParams()
@@ -80,6 +81,16 @@ export default function Detail() {
       </div>
 
       <p className="entry-full" dir="auto">{entry.transcript}</p>
+
+      {entry.audio && (
+        <div style={{ margin: '1.25rem 0' }}>
+          <AudioPlayer
+            audio={entry.audio}
+            title="Original Voice Recording"
+            showDownload={true}
+          />
+        </div>
+      )}
 
       {showingIllustration && (
         <p className="chip chip-ai">AI illustration</p>

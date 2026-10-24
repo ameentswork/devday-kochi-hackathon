@@ -10,6 +10,7 @@ import { LANGUAGES, isRTL } from '../lib/speech'
 import { todayISO } from '../lib/format'
 import { generateIllustration } from '../lib/illustration'
 import { MOOD_EMOJIS } from '../components/LiveEmojis'
+import AudioPlayer from '../components/AudioPlayer'
 
 export default function Review() {
   const { draft, dispatch } = useDraft()
@@ -81,6 +82,7 @@ export default function Review() {
       illustration: canIllustrate ? draft.illustration : null,
       illustrationGens: draft.illustrationGens,
       mood: draft.mood || '',
+      audio: draft.audio || null,
     }
 
     try {
@@ -192,6 +194,17 @@ export default function Review() {
           })}
         </div>
       </div>
+
+      {draft.audio && (
+        <div className="field">
+          <label>Spoken Voice Memo</label>
+          <AudioPlayer
+            audio={draft.audio}
+            title="Original Voice Recording"
+            onRemove={() => dispatch({ type: 'clearAudio' })}
+          />
+        </div>
+      )}
 
       <div className="field">
         <label htmlFor="review-text">Your words</label>

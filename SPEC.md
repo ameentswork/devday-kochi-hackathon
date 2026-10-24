@@ -41,20 +41,22 @@ local diary that survives closing and reopening the browser.
 | 17 | Speak in non-English languages (Malayalam, Hindi, Tamil, Punjabi, Urdu, Spanish, etc.) with smart word spacing, resilient silence handling, dialect fallbacks, and RTL script support | ✅ implemented |
 | 18 | Capture UI enhancements: real-time audio visualizer, native script language switcher pills, word count badge, copy/clear tools, and hybrid AI illustration support across local & Render | ✅ implemented |
 | 19 | Custom live emojis: real-time voice emotion detection, interactive animated floating emojis during capture, and persistent mood tagging across Review and Memories | ✅ implemented |
+| 20 | Individual member capture & routing: member login/signup routes directly to #/capture with individual user badge (avatar initial, member name, 🔒 Private indicator), isolated draft state, per-user language persistence, and dedicated Capture tab; admins strictly restricted from diary routes | ✅ implemented |
+| 21 | Native script transcription fidelity & voice memo recording: speaking in Malayalam (or other languages) preserves native script without forced English conversion, and simultaneous MediaRecorder captures original voice audio saved to IndexedDB for future memories playback | ✅ implemented |
 
 ## Screens
 
 | Screen | Contents | Status |
 |---|---|---|
-| Home | App name, today's date, large "Capture today's memory" button, 3 most recent entries with thumbnails, empty state | ✅ |
-| Capture | Language selector with native scripts & quick-switch pills, pulsing mic button with live audio visualizer, live mood emoji reactions, elapsed timer, live word counter, live transcript (interim styled lighter), copy/clear actions, start/stop, "type instead", permission/error messages | ✅ |
-| Review | Editable title/text, mood emoji selector, date, language, photo picker with previews + remove, Save/Discard | ✅ |
-| Memories | All entries newest first, title/date/language/mood/photo strip, empty state | ✅ |
-| Entry detail | Full text, mood badge, photo grid with enlarge-on-click, Edit and Delete (confirm) | ✅ |
+| Home | App name, today's date, large "Capture today's memory" button, 3 most recent entries with thumbnails & voice memo badges, empty state | ✅ |
+| Capture | Individual user badge (avatar initial, member name, 🔒 Private indicator), language selector with native scripts & quick-switch pills, pulsing mic button with live audio visualizer, simultaneous voice audio recorder, live mood emoji reactions with floating particles, elapsed timer, live word counter, live transcript (interim styled lighter), copy/clear actions, start/stop, "type instead", permission/error messages | ✅ |
+| Review | Voice memo audio playback player (listen/scrub/re-record), editable title/text, mood emoji selector, date, language, photo picker with previews + remove, Save/Discard | ✅ |
+| Memories | All entries newest first, title/date/language/mood/voice memo badge/photo strip, empty state | ✅ |
+| Entry detail | Full text, voice memo audio player with scrubber & duration, mood badge, photo grid with enlarge-on-click, audio download, Edit and Delete (confirm) | ✅ |
 | Settings | Default language, privacy note, about, "Delete all data" (confirm) | ✅ |
 
-Navigation: bottom tab bar on narrow screens, left rail ≥860 px — Home,
-Memories, Settings.
+Navigation: bottom tab bar on narrow screens, left rail ≥860 px —
+Member tabs: Home, Capture, Memories, Settings; Admin tabs: Dashboard, Members, Settings.
 
 ## Acceptance criteria
 
@@ -83,6 +85,8 @@ Memories, Settings.
 | 21 | Non-English speech recognition survives speech pauses without aborting take, formats inter-chunk spacing correctly, respects RTL text auto-direction, and resolves dialect codes (e.g. `pa-Guru-IN`) | ✅ |
 | 22 | Live audio visualizer gives visual sound wave feedback during speech, language preference persists instantly, and AI illustrations resolve reliably across both local and Render deployments | ✅ |
 | 23 | Live emojis react to spoken thoughts in real-time or via one-tap reaction pills with floating particle micro-animations, persist to IndexedDB, and display on entry cards and detail view | ✅ |
+| 24 | Logging in or signing up as a member navigates directly to #/capture, displaying the user's personal identity badge; draft state and language preferences are completely isolated between users, and the Capture tab is accessible in the member navigation bar while admins are blocked from member diary views | ✅ |
+| 25 | Selecting Malayalam (or any supported language) transcribes in that language's native script without forcibly resetting to English; every recording take saves the raw microphone audio as a voice memo in IndexedDB, and the audio can be played back in Review, Memories, and Detail view | ✅ |
 
 ## Design
 
@@ -97,16 +101,25 @@ Memories, Settings.
 
 ## Functional rules
 
-- **Speech:** feature-detect first; if missing, hide the mic and show the typing
-  fallback. `continuous` + `interimResults`, `lang` from selector — 12 options:
-  `en-IN`, `ml-IN`, `hi-IN`, `ta-IN`, `te-IN`, `kn-IN`, `bn-IN`, `mr-IN`,
-  `gu-IN`, `pa-IN`, `ur-IN`, `en-US` (`LANGUAGES` in `speech.js`). Restart on
-  `onend` until Stop or a fatal error. On `language-not-supported`, the session
-  transparently restarts in `en-IN` (`SPEECH_FALLBACK_LANG`), keeps the
-  transcript and shows a notice — the Web Speech API can't list supported
-  languages, so we try and handle failure. Never fake a transcript, never
-  overwrite user text, never claim success before the IndexedDB write resolves.
-  No audio-file recording.
+- **Speech & Multilingual Fidelity:** feature-detect first; if missing, hide the
+  mic and show the typing fallback. `continuous` + `interimResults`, `lang` from
+  selector bound strictly to BCP-47 locale (`ml-IN` for Malayalam, `en-US` for
+  English US, `hi-IN` for Hindi, `ta-IN` for Tamil, etc.). On
+  `language-not-supported`, display a clear notice informing the user that speech
+  recognition is unavailable on their browser engine while preserving their
+  selected language and voice recording — NEVER automatically switch or convert
+  the language to English. Speech transcript returned by the engine is preserved
+  in its native script (never translated, never transliterated into Latin
+  characters). Intentional aborts (`error: aborted`) and natural pauses
+  (`error: no-speech`) are handled silently without alarming users.
+- **Voice Memo Audio Recording:** simultaneous microphone audio capture using
+  the browser's `MediaRecorder` API runs during each recording take. Upon
+  completion or 60s timeout, the audio is encoded as a Blob (`audio/webm`,
+  `audio/ogg`, or `audio/wav`), tracked with duration, and persisted in
+  IndexedDB on the entry object as `audio: { blob, type, duration }`. In
+  Review, Memories, and Detail view, the dedicated `AudioPlayer` component
+  provides play/pause controls, progress scrubber, timeline duration, live
+  bouncing waveform bars, and download capability.
 - **Photos:** `accept="image/*" multiple`, max 3 per entry, resize to ≤1280 px
   long edge JPEG q0.8, stored as Blobs on the entry.
 - **Data:** entries persist in IndexedDB (see STACK.md). Call
@@ -117,7 +130,8 @@ Memories, Settings.
   to a cloud service. Illustration requests send only the first 1000 characters
   of the transcript to the Worker.
 - **Recording limit:** `MAX_RECORDING_SECONDS = 60` in `speech.js`. A take
-  auto-stops at 60s keeping its transcript; starting another take appends.
+  auto-stops at 60s keeping its transcript and voice recording; starting another
+  take appends.
 - **Illustration:** offered in Review only when `photos` is empty. All limits in
   `src/lib/limits.js`: `PROMPT_MAX_CHARS = 1000`,
   `REGENERATIONS_PER_ENTRY = 2`. Worker URL comes from
@@ -149,18 +163,30 @@ Memories, Settings.
   demo-only one-tap login that finds-or-creates `demo-admin@`/`demo-member@`
   accounts — **remove before any real deployment.** The Vite dev server
   proxies `/api` → `localhost:3000`.
+- **Individual Member Capture & Role Routing:** signing in or registering as a
+  member navigates directly to `#/capture`. The page renders a personalized
+  user badge with the member's avatar initial, name, and '🔒 Private' privacy
+  indicator. Capture draft state in `DraftContext` is isolated and reset upon
+  user changes, and speech language preferences are persisted per user
+  (`voice-diary-language-<uid>`). A dedicated `Capture` tab is present in member
+  navigation. Admins are blocked from `/capture`, `/review`, `/memories`, and
+  `/entry/:id` (redirected to `/` Admin Dashboard).
+- **Live Emojis & Mood Tracking:** real-time emotion detection maps spoken
+  words to 8 mood profiles (`happy`, `peaceful`, `cozy`, `inspired`, `excited`,
+  `energetic`, `reflective`, `low`), rendered with interactive one-tap pills
+  and floating particle micro-animations. Mood tags persist to IndexedDB on the
+  entry and are included in JSON/text exports.
 
 ## Out of scope / backlog
 
 Cut-if-short order (already all shipped): Settings extras, photo enlarge view,
-left-rail layout, transitions.
+left-rail layout, transitions, timeline search/date filters, JSON/text export,
+multilingual speech & dialect fallbacks, live audio visualizer, live emojis,
+individual member capture routing, voice memo audio recording via MediaRecorder.
 
 Future ideas (need a user story + criteria row above before implementing):
 
-- Search/filter memories
-- Export entries (JSON or text)
-- More dictation languages
-- Audio recording alongside transcript (needs `MediaRecorder` interaction testing)
+- Biometric lock on diary entry views
 
 ## Known constraints
 

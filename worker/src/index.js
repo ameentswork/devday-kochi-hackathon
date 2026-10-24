@@ -4,7 +4,7 @@
 const MAX_BODY_BYTES = 8 * 1024
 const PROMPT_MAX_CHARS = 1000
 
-const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct'
+const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
 const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell'
 
 const STYLE =

@@ -15,6 +15,7 @@ const emptyDraft = (uid) => ({
   illustration: null,
   illustrationGens: 0,
   mood: '',
+  audio: null,
 })
 
 function reducer(state, action) {
@@ -25,6 +26,10 @@ function reducer(state, action) {
       return { ...emptyDraft(action.uid), ...action.entry }
     case 'set':
       return { ...state, ...action.patch }
+    case 'setAudio':
+      return { ...state, audio: action.audio }
+    case 'clearAudio':
+      return { ...state, audio: null }
     case 'addPhotos':
       return { ...state, photos: [...state.photos, ...action.photos].slice(0, 3) }
     case 'removePhoto':

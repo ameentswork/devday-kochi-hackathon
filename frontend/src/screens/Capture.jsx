@@ -11,20 +11,20 @@ import {
   getLanguageShort,
   isRTL,
   LANGUAGES,
-  languageLabel,
   MAX_RECORDING_SECONDS,
   setDefaultLanguage,
-  SPEECH_FALLBACK_LANG,
   speechSupported,
 } from '../lib/speech'
 import { formatDuration } from '../lib/format'
 import { useDraft } from '../state/DraftContext'
 import { useAuth } from '../state/AuthContext'
+import { audioRecordingSupported, startAudioRecording } from '../lib/audioRecorder'
+import AudioPlayer from '../components/AudioPlayer'
 
 const WARN_AT_SECONDS = MAX_RECORDING_SECONDS - 10
 
 // Featured quick-switch languages for one-tap convenience
-const POPULAR_LANGUAGES = ['en-IN', 'ml-IN', 'hi-IN', 'ta-IN', 'ur-IN', 'en-US']
+const POPULAR_LANGUAGES = ['ml-IN', 'en-US', 'hi-IN', 'ta-IN', 'ur-IN', 'en-IN']
 
 export default function Capture() {
   const navigate = useNavigate()
@@ -41,13 +41,14 @@ export default function Capture() {
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState(false)
   const [mood, setMood] = useState('')
+  const [audioMemo, setAudioMemo] = useState(null)
 
   const sessionRef = useRef(null)
+  const audioRecorderRef = useRef(null)
   const finalRef = useRef('')
   const interimRef = useRef('')
   const elapsedRef = useRef(0)
   const timerRef = useRef(null)
-  const fallbackPending = useRef(false)
 
   const stopTimer = () => {
     clearInterval(timerRef.current)
@@ -57,6 +58,7 @@ export default function Capture() {
   useEffect(
     () => () => {
       sessionRef.current?.stop()
+      audioRecorderRef.current?.cancel()
       stopTimer()
     },
     [],
@@ -72,6 +74,7 @@ export default function Capture() {
     setInterim('')
     setError('')
     setNotice('')
+    setAudioMemo(null)
   }
 
   function tick() {
@@ -79,25 +82,44 @@ export default function Capture() {
     setElapsed(elapsedRef.current)
     if (elapsedRef.current >= MAX_RECORDING_SECONDS) {
       setNotice(
-        'Take stopped at 60 seconds — your words are kept below. ' +
+        'Take stopped at 60 seconds — your words and voice recording are kept below. ' +
           'Start another take to add more, or continue to review.',
       )
-      sessionRef.current?.stop()
+      stop()
     }
   }
 
   function handleLanguageChange(newLang) {
+    if (listening) {
+      stop()
+    }
+    setError('')
     setLang(newLang)
     setDefaultLanguage(newLang, user?.id)
   }
 
-  function start(langOverride = null, { keepNotice = false } = {}) {
+  async function start() {
     setError('')
-    if (!keepNotice) setNotice('')
+    setNotice('')
     setInterim('')
     interimRef.current = ''
 
-    const sessionLang = langOverride || lang
+    if (sessionRef.current) {
+      sessionRef.current.stop()
+      sessionRef.current = null
+    }
+
+    const sessionLang = lang
+
+    // Start simultaneous microphone audio recording for voice memory
+    if (audioRecordingSupported) {
+      try {
+        const recorder = await startAudioRecording()
+        audioRecorderRef.current = recorder
+      } catch (err) {
+        console.warn('Microphone audio capture warning:', err)
+      }
+    }
 
     const session = createSpeechSession({
       lang: sessionLang,
@@ -116,17 +138,8 @@ export default function Capture() {
         setInterim(currentInterim)
       },
       onError: (code, message) => {
-        if (
-          code === 'language-not-supported' &&
-          sessionLang !== SPEECH_FALLBACK_LANG
-        ) {
-          fallbackPending.current = true
-          setNotice(
-            `${languageLabel(sessionLang)} speech is not supported on this browser — continuing in English.`,
-          )
-        } else {
-          setError(message)
-        }
+        if (code === 'aborted') return
+        if (message) setError(message)
       },
       onEnd: () => {
         stopTimer()
@@ -137,14 +150,19 @@ export default function Capture() {
         interimRef.current = ''
         setFinalText(combined)
         setInterim('')
-
-        if (fallbackPending.current) {
-          fallbackPending.current = false
-          handleLanguageChange(SPEECH_FALLBACK_LANG)
-          start(SPEECH_FALLBACK_LANG, { keepNotice: true })
-          return
-        }
         setListening(false)
+
+        if (audioRecorderRef.current) {
+          audioRecorderRef.current
+            .stop()
+            .then((recData) => {
+              audioRecorderRef.current = null
+              if (recData?.blob) setAudioMemo(recData)
+            })
+            .catch(() => {
+              audioRecorderRef.current = null
+            })
+        }
       },
     })
 
@@ -153,15 +171,35 @@ export default function Capture() {
     session.start()
   }
 
-  function stop() {
+  async function stop() {
     sessionRef.current?.stop()
+    stopTimer()
+    setListening(false)
+
+    if (audioRecorderRef.current) {
+      try {
+        const recData = await audioRecorderRef.current.stop()
+        audioRecorderRef.current = null
+        if (recData?.blob) {
+          setAudioMemo(recData)
+        }
+      } catch (err) {
+        console.warn('Audio recorder stop note:', err)
+        audioRecorderRef.current = null
+      }
+    }
   }
 
   function continueToReview() {
     dispatch({
       type: 'new',
       uid: user?.id,
-      patch: { transcript: finalRef.current.trim(), language: lang, mood },
+      patch: {
+        transcript: finalRef.current.trim(),
+        language: lang,
+        mood,
+        audio: audioMemo,
+      },
     })
     navigate('/review')
   }
@@ -170,7 +208,12 @@ export default function Capture() {
     dispatch({
       type: 'new',
       uid: user?.id,
-      patch: { transcript: '', language: lang, mood },
+      patch: {
+        transcript: '',
+        language: lang,
+        mood,
+        audio: audioMemo,
+      },
     })
     navigate('/review')
   }
@@ -182,6 +225,11 @@ export default function Capture() {
     setInterim('')
     setError('')
     setNotice('')
+    if (audioRecorderRef.current) {
+      audioRecorderRef.current.cancel()
+      audioRecorderRef.current = null
+    }
+    setAudioMemo(null)
   }
 
   async function copyTranscript() {
@@ -382,6 +430,17 @@ export default function Capture() {
         </div>
       </div>
 
+      {/* Audio memo preview if voice was recorded */}
+      {audioMemo && !listening && (
+        <div style={{ width: '100%', maxWidth: '420px', margin: '0.4rem auto' }}>
+          <AudioPlayer
+            audio={audioMemo}
+            title="Spoken voice memo"
+            onRemove={() => setAudioMemo(null)}
+          />
+        </div>
+      )}
+
       {notice && (
         <p className="notice" role="status">
           {notice}
@@ -393,7 +452,7 @@ export default function Capture() {
         </p>
       )}
 
-      {hasTranscript && !listening && (
+      {(hasTranscript || Boolean(audioMemo)) && !listening && (
         <button
           type="button"
           className="btn btn-primary"
