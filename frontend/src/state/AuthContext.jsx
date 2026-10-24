@@ -29,6 +29,7 @@ export function AuthProvider({ children }) {
     setToken(d.token)
     setUid(d.user.id)
     setUser(d.user)
+    return d.user
   }
 
   async function signup(name, email, password) {
@@ -39,6 +40,7 @@ export function AuthProvider({ children }) {
     setToken(d.token)
     setUid(d.user.id)
     setUser(d.user)
+    return d.user
   }
 
   async function demoLogin(role) {
@@ -49,6 +51,7 @@ export function AuthProvider({ children }) {
     setToken(d.token)
     setUid(d.user.id)
     setUser(d.user)
+    return d.user
   }
 
   async function logout() {

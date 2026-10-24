@@ -35,10 +35,46 @@ function Shell() {
             path="/"
             element={user.role === 'admin' ? <AdminHome /> : <Home />}
           />
-          <Route path="/capture" element={<Capture />} />
-          <Route path="/review" element={<Review />} />
-          <Route path="/memories" element={<Memories />} />
-          <Route path="/entry/:id" element={<Detail />} />
+          <Route
+            path="/capture"
+            element={
+              user.role === 'admin' ? (
+                <Navigate to="/" replace />
+              ) : (
+                <Capture />
+              )
+            }
+          />
+          <Route
+            path="/review"
+            element={
+              user.role === 'admin' ? (
+                <Navigate to="/" replace />
+              ) : (
+                <Review />
+              )
+            }
+          />
+          <Route
+            path="/memories"
+            element={
+              user.role === 'admin' ? (
+                <Navigate to="/" replace />
+              ) : (
+                <Memories />
+              )
+            }
+          />
+          <Route
+            path="/entry/:id"
+            element={
+              user.role === 'admin' ? (
+                <Navigate to="/" replace />
+              ) : (
+                <Detail />
+              )
+            }
+          />
           <Route path="/settings" element={<Settings />} />
           <Route
             path="/admin/members"

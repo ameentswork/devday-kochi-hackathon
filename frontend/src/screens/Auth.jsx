@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
 
 export default function Auth() {
+  const navigate = useNavigate()
   const { login, signup, demoLogin } = useAuth()
   const [mode, setMode] = useState('signin')
   const [name, setName] = useState('')
@@ -22,8 +24,12 @@ export default function Auth() {
     }
     setBusy(true)
     try {
-      if (isSignup) await signup(name.trim(), email, password)
-      else await login(email, password)
+      const u = isSignup ? await signup(name.trim(), email, password) : await login(email, password)
+      if (u?.role === 'member') {
+        navigate('/capture')
+      } else {
+        navigate('/')
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -35,7 +41,12 @@ export default function Auth() {
     setError('')
     setBusy(true)
     try {
-      await demoLogin(role)
+      const u = await demoLogin(role)
+      if (u?.role === 'member') {
+        navigate('/capture')
+      } else {
+        navigate('/')
+      }
     } catch (err) {
       setError(err.message)
     } finally {

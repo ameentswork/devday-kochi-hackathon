@@ -14,11 +14,14 @@ export default function EntryCard({ entry }) {
   return (
     <Link to={`/entry/${entry.id}`} className="entry-card card">
       <div className="entry-card-head">
-        <h3>{entry.title || 'Untitled memory'}</h3>
+        <h3 dir="auto">
+          {entry.mood && <span className="entry-mood-badge" title="Mood">{entry.mood} </span>}
+          {entry.title || 'Untitled memory'}
+        </h3>
         <span className="chip">{languageLabel(entry.language)}</span>
       </div>
       <p className="entry-date">{formatDate(entry.entryDate)}</p>
-      <p className="entry-preview">{entry.transcript}</p>
+      <p className="entry-preview" dir="auto">{entry.transcript}</p>
       <PhotoStrip photos={thumbs} />
       {!hasPhotos && entry.illustration && (
         <span className="chip chip-ai">AI illustration</span>

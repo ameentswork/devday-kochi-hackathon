@@ -98,6 +98,7 @@ const DEMO_ENTRIES = [
   {
     title: 'Morning walk in the park',
     language: 'en-IN',
+    mood: '🌿',
     entryDate: todayISO(),
     transcript:
       'Went for a long walk this morning before the heat set in. The park was ' +
@@ -112,6 +113,7 @@ const DEMO_ENTRIES = [
   {
     title: 'ഇന്നത്തെ പ്രധാന നിമിഷം',
     language: 'ml-IN',
+    mood: '☕',
     entryDate: daysAgoISO(1),
     transcript:
       'ഇന്ന് വൈകുന്നേരം വീട്ടിന്റെ മുറ്റത്ത് ഇരുന്ന് ചായ കുടിച്ചു. ' +
@@ -122,6 +124,7 @@ const DEMO_ENTRIES = [
   {
     title: 'First rain of the season',
     language: 'en-US',
+    mood: '🌧️',
     entryDate: daysAgoISO(2),
     transcript:
       'The first proper rain arrived today. I stood at the window with coffee ' +
@@ -132,6 +135,7 @@ const DEMO_ENTRIES = [
   {
     title: 'A quiet Sunday',
     language: 'en-IN',
+    mood: '😊',
     entryDate: daysAgoISO(4),
     transcript:
       'Slept in, cooked a slow lunch, read a few chapters. No plans, no ' +
@@ -167,6 +171,7 @@ export async function seedDemoEntries() {
       photos,
       illustration,
       illustrationGens: demo.illustrationGens || 0,
+      mood: demo.mood || '',
       createdAt: now,
       updatedAt: now,
     })

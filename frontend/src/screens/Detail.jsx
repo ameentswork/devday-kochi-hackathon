@@ -70,13 +70,16 @@ export default function Detail() {
 
   return (
     <div>
-      <h1 className="page-title">{entry.title || 'Untitled memory'}</h1>
+      <h1 className="page-title" dir="auto">
+        {entry.mood && <span className="entry-mood-badge" title="Mood">{entry.mood} </span>}
+        {entry.title || 'Untitled memory'}
+      </h1>
       <div className="detail-meta">
         <span>{formatDate(entry.entryDate)}</span>
         <span className="chip">{languageLabel(entry.language)}</span>
       </div>
 
-      <p className="entry-full">{entry.transcript}</p>
+      <p className="entry-full" dir="auto">{entry.transcript}</p>
 
       {showingIllustration && (
         <p className="chip chip-ai">AI illustration</p>

@@ -6,14 +6,10 @@ import { useObjectUrls } from '../components/PhotoStrip'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { addEntry, updateEntry } from '../lib/db'
 import { MAX_PHOTOS, processFiles } from '../lib/photos'
-import { LANGUAGES } from '../lib/speech'
+import { LANGUAGES, isRTL } from '../lib/speech'
 import { todayISO } from '../lib/format'
 import { generateIllustration } from '../lib/illustration'
-import {
-  illustrationAllowed,
-  recordIllustration,
-  REGENERATIONS_PER_ENTRY,
-} from '../lib/limits'
+import { MOOD_EMOJIS } from '../components/LiveEmojis'
 
 export default function Review() {
   const { draft, dispatch } = useDraft()
@@ -32,7 +28,6 @@ export default function Review() {
 
   const isEditing = Boolean(draft.id)
   const canIllustrate = draft.photos.length === 0
-  const regensUsed = Math.max(0, draft.illustrationGens - 1)
 
   async function onPickPhotos(event) {
     try {
@@ -54,10 +49,6 @@ export default function Review() {
   }
 
   async function illustrate() {
-    if (!illustrationAllowed()) {
-      toast('Daily illustration limit reached — the entry can still be saved.')
-      return
-    }
     setGenerating(true)
     try {
       const illustration = await generateIllustration(
@@ -65,7 +56,6 @@ export default function Review() {
         draft.language,
       )
       dispatch({ type: 'setIllustration', illustration })
-      recordIllustration()
     } catch (err) {
       toast(`${err.message} — the entry can still be saved.`, 'error')
     } finally {
@@ -90,6 +80,7 @@ export default function Review() {
       photos: draft.photos,
       illustration: canIllustrate ? draft.illustration : null,
       illustrationGens: draft.illustrationGens,
+      mood: draft.mood || '',
     }
 
     try {
@@ -138,6 +129,7 @@ export default function Review() {
           type="text"
           value={draft.title}
           placeholder="Untitled memory"
+          dir={isRTL(draft.language) ? 'rtl' : 'ltr'}
           onChange={(e) =>
             dispatch({ type: 'set', patch: { title: e.target.value } })
           }
@@ -175,11 +167,39 @@ export default function Review() {
       </div>
 
       <div className="field">
+        <label>How did today feel?</label>
+        <div className="review-mood-row" role="radiogroup" aria-label="Select mood emoji">
+          {MOOD_EMOJIS.map((m) => {
+            const isSelected = draft.mood === m.emoji
+            return (
+              <button
+                key={m.emoji}
+                type="button"
+                className={`mood-select-btn${isSelected ? ' active' : ''}`}
+                onClick={() =>
+                  dispatch({
+                    type: 'set',
+                    patch: { mood: isSelected ? '' : m.emoji },
+                  })
+                }
+                title={m.label}
+                aria-checked={isSelected}
+              >
+                <span className="mood-select-emoji">{m.emoji}</span>
+                <span className="mood-select-label">{m.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="field">
         <label htmlFor="review-text">Your words</label>
         <textarea
           id="review-text"
           value={draft.transcript}
           placeholder="What happened today?"
+          dir={isRTL(draft.language) ? 'rtl' : 'ltr'}
           onChange={(e) =>
             dispatch({ type: 'set', patch: { transcript: e.target.value } })
           }
@@ -251,11 +271,9 @@ export default function Review() {
                   type="button"
                   className="btn btn-ghost"
                   onClick={illustrate}
-                  disabled={generating || regensUsed >= REGENERATIONS_PER_ENTRY}
+                  disabled={generating}
                 >
-                  {generating
-                    ? 'Painting…'
-                    : `Regenerate (${REGENERATIONS_PER_ENTRY - regensUsed} left)`}
+                  {generating ? 'Painting…' : 'Regenerate'}
                 </button>
                 <button
                   type="button"

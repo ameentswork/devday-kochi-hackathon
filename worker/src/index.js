@@ -3,7 +3,6 @@
 
 const MAX_BODY_BYTES = 8 * 1024
 const PROMPT_MAX_CHARS = 1000
-const DAILY_IMAGE_CAP = 100 // best-effort, per isolate (resets on cold start)
 
 const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct'
 const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell'
@@ -16,16 +15,6 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-let usage = { day: '', count: 0 }
-
-function hitDailyCap() {
-  const today = new Date().toISOString().slice(0, 10)
-  if (usage.day !== today) usage = { day: today, count: 0 }
-  if (usage.count >= DAILY_IMAGE_CAP) return true
-  usage.count += 1
-  return false
 }
 
 function json(data, status = 200) {
@@ -80,8 +69,6 @@ async function handlePrompt(request, env) {
 }
 
 async function handleImage(request, env) {
-  if (hitDailyCap()) throw httpError(429, 'Daily illustration limit reached')
-
   const body = await readJson(request)
   const prompt = typeof body.prompt === 'string' ? body.prompt : ''
   if (!prompt.trim()) throw httpError(400, 'prompt is required')

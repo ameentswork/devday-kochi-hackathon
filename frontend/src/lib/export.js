@@ -42,6 +42,7 @@ export async function exportJSON() {
       title: e.title,
       entryDate: e.entryDate,
       language: e.language,
+      mood: e.mood || null,
       transcript: e.transcript,
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
@@ -67,7 +68,7 @@ export async function exportText() {
   const parts = ['VOICE DIARY — export', `Exported ${new Date().toLocaleString()}`, '']
   for (const e of entries) {
     parts.push('═'.repeat(40))
-    parts.push(`${e.title || 'Untitled memory'}`)
+    parts.push(`${e.mood ? e.mood + ' ' : ''}${e.title || 'Untitled memory'}`)
     parts.push(`${formatDate(e.entryDate)} · ${languageLabel(e.language)}`)
     if (e.photos?.length) parts.push(`[${e.photos.length} photo(s)]`)
     if (e.illustration && !e.photos?.length) parts.push('[AI illustration]')

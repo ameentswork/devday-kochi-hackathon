@@ -1,26 +1,28 @@
-import { createContext, useContext, useMemo, useReducer } from 'react'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef } from 'react'
 import { todayISO } from '../lib/format'
 import { getDefaultLanguage } from '../lib/speech'
+import { useAuth } from './AuthContext'
 
 const DraftContext = createContext(null)
 
-const emptyDraft = () => ({
+const emptyDraft = (uid) => ({
   id: null,
   title: '',
   transcript: '',
-  language: getDefaultLanguage(),
+  language: getDefaultLanguage(uid),
   entryDate: todayISO(),
   photos: [],
   illustration: null,
   illustrationGens: 0,
+  mood: '',
 })
 
 function reducer(state, action) {
   switch (action.type) {
     case 'new':
-      return { ...emptyDraft(), ...action.patch }
+      return { ...emptyDraft(action.uid), ...action.patch }
     case 'load':
-      return { ...emptyDraft(), ...action.entry }
+      return { ...emptyDraft(action.uid), ...action.entry }
     case 'set':
       return { ...state, ...action.patch }
     case 'addPhotos':
@@ -39,14 +41,24 @@ function reducer(state, action) {
     case 'clearIllustration':
       return { ...state, illustration: null }
     case 'reset':
-      return emptyDraft()
+      return emptyDraft(action.uid)
     default:
       return state
   }
 }
 
 export function DraftProvider({ children }) {
-  const [draft, dispatch] = useReducer(reducer, undefined, emptyDraft)
+  const { user } = useAuth()
+  const prevUid = useRef(user?.id)
+  const [draft, dispatch] = useReducer(reducer, user?.id, (uid) => emptyDraft(uid))
+
+  useEffect(() => {
+    if (prevUid.current !== user?.id) {
+      prevUid.current = user?.id
+      dispatch({ type: 'reset', uid: user?.id })
+    }
+  }, [user?.id])
+
   const value = useMemo(() => ({ draft, dispatch }), [draft])
   return (
     <DraftContext.Provider value={value}>{children}</DraftContext.Provider>

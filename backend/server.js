@@ -292,6 +292,44 @@ app.get('/api/admin/health', requireAdmin, (_req, res) => {
   })
 })
 
+// Optional AI Worker proxy (Render deployment or cloud worker)
+const WORKER_URL = (
+  process.env.WORKER_URL ||
+  process.env.VITE_WORKER_URL ||
+  ''
+).replace(/\/$/, '')
+
+if (WORKER_URL) {
+  app.post('/api/prompt', async (req, res) => {
+    try {
+      const resp = await fetch(`${WORKER_URL}/api/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      })
+      const data = await resp.json()
+      res.status(resp.status).json(data)
+    } catch {
+      res.status(502).json({ error: 'Worker proxy failed' })
+    }
+  })
+
+  app.post('/api/image', async (req, res) => {
+    try {
+      const resp = await fetch(`${WORKER_URL}/api/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      })
+      const buf = await resp.arrayBuffer()
+      res.set('Content-Type', 'image/png')
+      res.status(resp.status).send(Buffer.from(buf))
+    } catch {
+      res.status(502).json({ error: 'Worker proxy failed' })
+    }
+  })
+}
+
 // Serve the built frontend (production). Diary data stays client-side.
 if (!fs.existsSync(DIST)) {
   console.warn('frontend/dist not found — run `npm run build` first.')

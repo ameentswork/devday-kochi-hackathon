@@ -39,7 +39,8 @@ devday-kochi-hackathon/
 | UI | React (JavaScript, `.jsx`) | 19.3.x | Function components + hooks; plain JS because the Web Speech API has no built-in types |
 | Routing | `react-router-dom`, `HashRouter` | 7.18.x | Hash URLs need no rewrite rules on any static host |
 | Storage | IndexedDB via `idb` | 8.0.x | Promise wrapper; survives browser restarts; stores Blobs natively |
-| Speech | Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) | browser | Built into Chrome, no API key; needs internet (audio goes to a cloud service) |
+| Speech | Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) | browser | Built into Chrome/Edge/Safari; enhanced with deferred restart resilience, BCP-47 dialect fallback chain (e.g. `pa-Guru-IN` / `pa-IN`), smart word boundary spacing, and RTL direction detection |
+| Audio Visualizer | Web Audio API (`AudioContext`, `AnalyserNode`) | browser | Zero-dependency live waveform equalizer feedback during active microphone recording |
 | Photos | `<input type="file" accept="image/*" multiple>` + canvas resize | browser | Gallery/camera on Android; max 1280 px, JPEG q0.8, stored as Blob |
 | Styling | Hand-written CSS, one file: `src/styles/app.css` | — | Design tokens as CSS variables; no UI kit |
 | State | `useState`, `useReducer`, `DraftContext` | — | No state library |
@@ -58,12 +59,12 @@ devday-kochi-hackathon/
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Gateway | Cloudflare Worker (`worker/`) | Only place AI is called — no secrets in browser code |
+| Gateway | Cloudflare Worker (`worker/`) + Local/Render Fallback | Dual-environment: Cloudflare Worker AI (Llama 3.1 + Flux 1) with seamless local watercolor canvas generator fallback when worker is offline or on Render without worker config |
 | Prompt model | `@cf/meta/llama-3.1-8b-instruct` | Turns the transcript into a ≤60-word English image prompt |
 | Image model | `@cf/black-forest-labs/flux-1-schnell` | Watercolour illustration → PNG bytes |
 | Tooling | `wrangler` 4.x (local dev dep) | `npx wrangler dev --remote` — AI bindings only run in the cloud |
-| Frontend client | `src/lib/illustration.js` | `VITE_WORKER_URL` env (default `http://localhost:8787`) |
-| Limits | `src/lib/limits.js` | 1000-char prompt input, 5 illustrations/day/device, 2 regenerations/entry, worker-side daily cap |
+| Frontend client | `src/lib/illustration.js` | `VITE_WORKER_URL` env (default `http://localhost:8787`), with automatic watercolor fallback |
+| Limits | `src/lib/limits.js` | 1000-char prompt input (daily illustration and regeneration limits removed for testing) |
 
 ## Toolchain
 
@@ -129,9 +130,8 @@ docker run --rm cloudflare/cloudflared:latest tunnel --no-autoupdate --url http:
   (`seedText`) so text appends.
 - **AI goes through the Worker only.** Uploaded photos always win: the
   illustration UI and stored `illustration` appear only when `photos` is empty.
-  The worker's daily cap is per-isolate (best-effort — Cloudflare can run
-  multiple isolates); the device's 5/day and 2-regens rules are the real UX
-  limits.
+  Daily illustration limits (device counter + worker cap) were removed for the
+  demo — the 2-regens-per-entry rule remains.
 - **Draft flow:** Capture writes to `DraftContext`; Review reads/edits it;
   Detail → Edit loads an existing entry into the draft (`type: 'load'`).
 - **PWA is off in `npm run dev`;** verify with `npm run build && npm run preview`.

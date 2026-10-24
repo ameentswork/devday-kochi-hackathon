@@ -29,7 +29,7 @@ local diary that survives closing and reopening the browser.
 | 5 | Edit or delete an entry, with confirmation before deleting | ✅ implemented |
 | 6 | Told plainly when speech recognition is unavailable; can type instead | ✅ implemented |
 | 7 | Recording take auto-stops at 60s with a countdown and a 50s warning; a new take appends to the transcript | ✅ implemented |
-| 8 | An entry with no uploaded photos can get a watercolour AI illustration (≤5/day per device, ≤2 regenerations per entry) | ✅ implemented |
+| 8 | An entry with no uploaded photos can get a watercolour AI illustration (unlimited during testing) | ✅ implemented |
 | 9 | Illustration limits and failures degrade gracefully — friendly message, entry still saves without an image | ✅ implemented |
 | 10 | One-tap demo entries (with generated images) so the UI can be explored without a mic or photos | ✅ implemented |
 | 11 | Pick from 12 languages incl. major Indian languages; if the browser can't recognise the chosen one, the session continues in English automatically with a notice | ✅ implemented |
@@ -38,16 +38,19 @@ local diary that survives closing and reopening the browser.
 | 14 | Admin dashboard: member stats (total/active/deactivated), total entry count, service health — never any diary content | ✅ implemented |
 | 15 | Admin member management: name/email/role/status/joined list with activate/deactivate + confirmation | ✅ implemented |
 | 16 | Member dashboard: welcome message, create-entry CTA, searchable/date-filterable timeline, JSON + text export | ✅ implemented |
+| 17 | Speak in non-English languages (Malayalam, Hindi, Tamil, Punjabi, Urdu, Spanish, etc.) with smart word spacing, resilient silence handling, dialect fallbacks, and RTL script support | ✅ implemented |
+| 18 | Capture UI enhancements: real-time audio visualizer, native script language switcher pills, word count badge, copy/clear tools, and hybrid AI illustration support across local & Render | ✅ implemented |
+| 19 | Custom live emojis: real-time voice emotion detection, interactive animated floating emojis during capture, and persistent mood tagging across Review and Memories | ✅ implemented |
 
 ## Screens
 
 | Screen | Contents | Status |
 |---|---|---|
 | Home | App name, today's date, large "Capture today's memory" button, 3 most recent entries with thumbnails, empty state | ✅ |
-| Capture | Language selector, pulsing mic button, elapsed timer, live transcript (interim styled lighter), start/stop, "type instead", permission/error messages | ✅ |
-| Review | Editable title/text, date, language, photo picker with previews + remove, Save/Discard | ✅ |
-| Memories | All entries newest first, title/date/language/photo strip, empty state | ✅ |
-| Entry detail | Full text, photo grid with enlarge-on-click, Edit and Delete (confirm) | ✅ |
+| Capture | Language selector with native scripts & quick-switch pills, pulsing mic button with live audio visualizer, live mood emoji reactions, elapsed timer, live word counter, live transcript (interim styled lighter), copy/clear actions, start/stop, "type instead", permission/error messages | ✅ |
+| Review | Editable title/text, mood emoji selector, date, language, photo picker with previews + remove, Save/Discard | ✅ |
+| Memories | All entries newest first, title/date/language/mood/photo strip, empty state | ✅ |
+| Entry detail | Full text, mood badge, photo grid with enlarge-on-click, Edit and Delete (confirm) | ✅ |
 | Settings | Default language, privacy note, about, "Delete all data" (confirm) | ✅ |
 
 Navigation: bottom tab bar on narrow screens, left rail ≥860 px — Home,
@@ -67,7 +70,7 @@ Memories, Settings.
 | 8 | Unsupported browser still works with typed entries + shows a notice | ✅ |
 | 9 | Take auto-stops at 60s keeping the transcript; countdown visible, warning at 50s; new take appends | ✅ |
 | 10 | No-photo entries offer "Add an AI illustration"; one or more uploaded photos hides it entirely | ✅ |
-| 11 | Limits enforced on-device (5/day, 2 regens/entry) and in the Worker (daily cap); limit or failure → friendly message, save without image | ✅ |
+| 11 | Regenerations unlimited during testing; generation failure → friendly message, save without image | ✅ |
 | 12 | No secrets in browser code; all model calls go through the Cloudflare Worker | ✅ |
 | 13 | "Add demo entries" (Home empty state + Settings → Data) seeds 4 sample entries incl. photos, an illustration and a Malayalam entry | ✅ |
 | 14 | Choosing an unsupported language restarts recognition in `en-IN` mid-take, keeps the transcript and shows a notice | ✅ |
@@ -77,6 +80,9 @@ Memories, Settings.
 | 18 | Members only ever see their own diary — IndexedDB is namespaced per account (`voice-diary-<uid>`) and entries carry an `owner` stamp checked on read/update/delete | ✅ |
 | 19 | Admin API routes are server-side role-checked (401/403); signup ignores any client-supplied role; first account = admin | ✅ |
 | 20 | Personal export downloads JSON (photos embedded base64) or plain text | ✅ |
+| 21 | Non-English speech recognition survives speech pauses without aborting take, formats inter-chunk spacing correctly, respects RTL text auto-direction, and resolves dialect codes (e.g. `pa-Guru-IN`) | ✅ |
+| 22 | Live audio visualizer gives visual sound wave feedback during speech, language preference persists instantly, and AI illustrations resolve reliably across both local and Render deployments | ✅ |
+| 23 | Live emojis react to spoken thoughts in real-time or via one-tap reaction pills with floating particle micro-animations, persist to IndexedDB, and display on entry cards and detail view | ✅ |
 
 ## Design
 
@@ -113,14 +119,15 @@ Memories, Settings.
 - **Recording limit:** `MAX_RECORDING_SECONDS = 60` in `speech.js`. A take
   auto-stops at 60s keeping its transcript; starting another take appends.
 - **Illustration:** offered in Review only when `photos` is empty. All limits in
-  `src/lib/limits.js`: `PROMPT_MAX_CHARS = 1000`, `ILLUSTRATIONS_PER_DAY = 5`,
-  `REGENERATIONS_PER_ENTRY = 2`, counted in localStorage. Worker URL comes from
+  `src/lib/limits.js`: `PROMPT_MAX_CHARS = 1000`,
+  `REGENERATIONS_PER_ENTRY = 2`. Worker URL comes from
   `VITE_WORKER_URL` (default `http://localhost:8787`). Saved on the entry as
   `illustration: {prompt, name, type, blob}` + `illustrationGens`; dropped when
   photos exist.
 - **Worker (`worker/`):** `POST /api/prompt` (chat model → ≤60-word English
   prompt in fixed watercolour style), `POST /api/image` (flux-1-schnell → PNG),
-  8 KB body cap, daily image cap (per-isolate best-effort), CORS POST-only.
+  8 KB body cap, CORS POST-only. Daily illustration limits (device + worker
+  cap) were removed — cost guardrails currently rely on Workers AI free tier.
 - **Auth (`backend/`):** signup → `member`; the FIRST registered user becomes
   `admin` (synchronous JSON-file writes make the first-account race safe).
   Passwords hashed with `crypto.scrypt` + per-user salt; sessions are random
