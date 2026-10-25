@@ -193,7 +193,7 @@ function audioBufferToWavBlob(buffer) {
   return new Blob([view], { type: 'audio/wav' })
 }
 
-async function createDemoAudioBlob(durationSeconds = 6) {
+export async function createDemoAudioBlob(durationSeconds = 6) {
   try {
     const sampleRate = 44100
     const AudioCtx =
@@ -241,21 +241,21 @@ export async function seedDemoEntries() {
     )
     const illustration = demo.illustration
       ? {
-          prompt:
-            'soft watercolour illustration, warm ivory and forest-green palette',
-          name: demo.illustration.name,
-          type: 'image/jpeg',
-          blob: await sceneBlob(demo.illustration.variant),
-        }
+        prompt:
+          'soft watercolour illustration, warm ivory and forest-green palette',
+        name: demo.illustration.name,
+        type: 'image/jpeg',
+        blob: await sceneBlob(demo.illustration.variant),
+      }
       : null
 
     const audio =
       sampleAudioBlob && (idx === 0 || idx === 1)
         ? {
-            blob: sampleAudioBlob,
-            type: 'audio/wav',
-            duration: 6,
-          }
+          blob: sampleAudioBlob,
+          type: 'audio/wav',
+          duration: 6,
+        }
         : null
 
     await addEntry({

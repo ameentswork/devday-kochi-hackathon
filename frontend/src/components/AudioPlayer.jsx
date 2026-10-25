@@ -13,18 +13,21 @@ export default function AudioPlayer({
 
   const audioRef = useRef(null)
 
-  // Manage Blob URL lifecycle safely via useMemo and cleanup
+  // Manage audio URL: supports both remote R2 streaming URLs and local Blob URLs
   const audioBlob = audio?.blob
   const audioUrl = useMemo(() => {
+    if (audio?.url) return audio.url
     if (!audioBlob) return ''
     return URL.createObjectURL(audioBlob)
-  }, [audioBlob])
+  }, [audioBlob, audio?.url])
 
   useEffect(() => {
     return () => {
-      if (audioUrl) URL.revokeObjectURL(audioUrl)
+      if (audioUrl && audioBlob && !audio?.url) {
+        URL.revokeObjectURL(audioUrl)
+      }
     }
-  }, [audioUrl])
+  }, [audioUrl, audioBlob, audio?.url])
 
   // Sync duration when metadata loads
   const handleLoadedMetadata = () => {

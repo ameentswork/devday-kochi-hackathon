@@ -5,3 +5,17 @@ workers_dev = true
 
 [ai]
 binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "voice-diary-db"
+database_id = "913e350b-6cc2-467e-84f0-696a7c042211"
+remote = true
+
+# NOTE: Cloudflare requires enabling R2 in the Cloudflare Dashboard before creating buckets (Error 10042).
+# Once enabled in dashboard, run: npx wrangler r2 bucket create voice-diary-audio
+# And uncomment the following block:
+# [[r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "voice-diary-audio"
+
