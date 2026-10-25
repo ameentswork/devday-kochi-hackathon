@@ -20,6 +20,7 @@ import { useDraft } from '../state/DraftContext'
 import { useAuth } from '../state/AuthContext'
 import { audioRecordingSupported, startAudioRecording } from '../lib/audioRecorder'
 import { createDemoAudioBlob } from '../lib/demo'
+import { transcribeAudioBlob } from '../lib/cloud'
 import AudioPlayer from '../components/AudioPlayer'
 
 const WARN_AT_SECONDS = MAX_RECORDING_SECONDS - 10
@@ -33,14 +34,13 @@ export default function Capture() {
   const { dispatch } = useDraft()
   const toast = useToast()
 
-  const [captureMode, setCaptureMode] = useState('dictate') // 'dictate' | 'audio'
   const [lang, setLang] = useState(() => getDefaultLanguage(user?.id))
   const [listening, setListening] = useState(false)
-  const [recordingAudioClip, setRecordingAudioClip] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [finalText, setFinalText] = useState('')
   const [interim, setInterim] = useState('')
-  const [audioNote, setAudioNote] = useState('')
+  const [isEditingText, setIsEditingText] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [copied, setCopied] = useState(false)
@@ -76,7 +76,6 @@ export default function Capture() {
     interimRef.current = ''
     setFinalText('')
     setInterim('')
-    setAudioNote('')
     setError('')
     setNotice('')
     setAudioMemo(null)
@@ -87,8 +86,8 @@ export default function Capture() {
     setElapsed(elapsedRef.current)
     if (elapsedRef.current >= MAX_RECORDING_SECONDS) {
       setNotice(
-        'Take stopped at 60 seconds — your words and voice recording are kept below. ' +
-          'Start another take to add more, or continue to review.',
+        'Recording reached 60 seconds — your words and voice recording are saved below. ' +
+          'Tap Continue to review or start another take.',
       )
       stop()
     }
@@ -103,8 +102,45 @@ export default function Capture() {
     setDefaultLanguage(newLang, user?.id)
   }
 
-  // --- Voice Dictation (Web Speech API with exclusive mic access) ---
-  function startDictation() {
+  /**
+   * Transcribe recorded audio Blob using Cloudflare Workers AI Whisper
+   */
+  async function transcribeVoiceMemo(blob = null) {
+    const targetBlob = blob || audioMemo?.blob
+    if (!targetBlob) {
+      toast('No voice audio available to transcribe', 'info')
+      return
+    }
+
+    setTranscribing(true)
+    setError('')
+    setNotice('Transcribing your voice with AI Whisper…')
+
+    try {
+      const text = await transcribeAudioBlob(targetBlob, lang)
+      if (text && text.trim()) {
+        const combined = finalRef.current
+          ? `${finalRef.current} ${text.trim()}`.trim()
+          : text.trim()
+        finalRef.current = combined
+        setFinalText(combined)
+        setNotice('')
+        toast('Voice transcribed to text!', 'success')
+      } else {
+        setNotice('Voice memo captured! Tap Continue to review or type your thoughts.')
+      }
+    } catch (err) {
+      console.warn('Transcription error:', err)
+      setError('Could not transcribe audio: ' + (err.message || err))
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
+  /**
+   * Start recording voice audio with MediaRecorder and concurrent Web Speech recognition
+   */
+  async function start() {
     setError('')
     setNotice('')
     setInterim('')
@@ -117,116 +153,72 @@ export default function Capture() {
 
     const sessionLang = lang
 
-    const session = createSpeechSession({
-      lang: sessionLang,
-      seedText: finalRef.current,
-      onStart: () => {
-        setListening(true)
-        elapsedRef.current = 0
-        setElapsed(0)
-        stopTimer()
-        timerRef.current = setInterval(tick, 1000)
-      },
-      onResult: (final, currentInterim) => {
-        finalRef.current = final
-        interimRef.current = currentInterim
-        setFinalText(final)
-        setInterim(currentInterim)
-      },
-      onError: (code, message) => {
-        if (code === 'aborted') return
-        if (message) setError(message)
-      },
-      onEnd: () => {
-        stopTimer()
-        const combined = interimRef.current
-          ? `${finalRef.current} ${interimRef.current}`.trim()
-          : finalRef.current.trim()
-        finalRef.current = combined
-        interimRef.current = ''
-        setFinalText(combined)
-        setInterim('')
-        setListening(false)
-      },
-    })
-
-    if (!session) return
-    sessionRef.current = session
-    session.start()
-  }
-
-  // --- Voice Memo (MediaRecorder with exclusive mic access) ---
-  async function startAudioMemo() {
-    setError('')
-    setNotice('')
-    if (!audioRecordingSupported) {
-      setError('Audio recording is not supported in this browser.')
-      return
-    }
-
-    try {
-      const recorder = await startAudioRecording()
-      audioRecorderRef.current = recorder
-      setListening(true)
-      elapsedRef.current = 0
-      setElapsed(0)
-      stopTimer()
-      timerRef.current = setInterval(tick, 1000)
-    } catch (err) {
-      setError('Could not access microphone: ' + (err.message || err))
-    }
-  }
-
-  // Record a dedicated audio clip alongside dictated text
-  async function startVoiceClip() {
-    setError('')
-    setNotice('')
-    if (listening) {
-      stop()
-    }
-    try {
-      const recorder = await startAudioRecording()
-      audioRecorderRef.current = recorder
-      setRecordingAudioClip(true)
-      elapsedRef.current = 0
-      setElapsed(0)
-      stopTimer()
-      timerRef.current = setInterval(() => {
-        elapsedRef.current += 1
-        setElapsed(elapsedRef.current)
-        if (elapsedRef.current >= MAX_RECORDING_SECONDS) {
-          stopVoiceClip()
-        }
-      }, 1000)
-    } catch (err) {
-      setError('Could not access microphone for voice clip: ' + (err.message || err))
-    }
-  }
-
-  async function stopVoiceClip() {
-    stopTimer()
-    setRecordingAudioClip(false)
-    if (audioRecorderRef.current) {
+    // 1. Start audio recording to preserve original voice audio
+    if (audioRecordingSupported) {
       try {
-        const recData = await audioRecorderRef.current.stop()
-        audioRecorderRef.current = null
-        if (recData?.blob) {
-          setAudioMemo(recData)
-          toast('Voice clip attached', 'success')
+        const recorder = await startAudioRecording()
+        audioRecorderRef.current = recorder
+      } catch (err) {
+        console.warn('Microphone audio capture warning:', err)
+      }
+    }
+
+    setListening(true)
+    elapsedRef.current = 0
+    setElapsed(0)
+    stopTimer()
+    timerRef.current = setInterval(tick, 1000)
+
+    // 2. Start speech recognition for live real-time transcript preview
+    if (speechSupported) {
+      try {
+        const session = createSpeechSession({
+          lang: sessionLang,
+          seedText: finalRef.current,
+          onStart: () => {},
+          onResult: (final, currentInterim) => {
+            finalRef.current = final
+            interimRef.current = currentInterim
+            setFinalText(final)
+            setInterim(currentInterim)
+          },
+          onError: (code, message) => {
+            // Non-fatal speech errors are handled gracefully without interrupting audio recording
+            if (code === 'aborted' || code === 'no-speech') return
+            console.warn('Speech engine note:', message)
+          },
+          onEnd: () => {
+            const combined = interimRef.current
+              ? `${finalRef.current} ${interimRef.current}`.trim()
+              : finalRef.current.trim()
+            finalRef.current = combined
+            interimRef.current = ''
+            setFinalText(combined)
+            setInterim('')
+          },
+        })
+
+        if (session) {
+          sessionRef.current = session
+          session.start()
         }
       } catch (err) {
-        console.warn('Voice clip stop warning:', err)
-        audioRecorderRef.current = null
+        console.warn('Speech session setup note:', err)
       }
     }
   }
 
+  /**
+   * Stop voice recording and automatically transcribe with AI Whisper if speech was empty
+   */
   async function stop() {
     stopTimer()
     setListening(false)
 
     if (sessionRef.current) {
-      sessionRef.current.stop()
+      try {
+        sessionRef.current.stop()
+      } catch {}
       sessionRef.current = null
     }
 
@@ -236,25 +228,26 @@ export default function Capture() {
         audioRecorderRef.current = null
         if (recData?.blob) {
           setAudioMemo(recData)
-          toast('Voice recording saved', 'success')
+
+          // If speech recognition was silent or didn't produce text, automatically transcribe with AI Whisper!
+          if (!finalRef.current.trim()) {
+            transcribeVoiceMemo(recData.blob)
+          } else {
+            toast('Voice memo and transcript saved', 'success')
+          }
         }
       } catch (err) {
-        console.warn('Audio recorder stop note:', err)
+        console.warn('Audio recorder stop error:', err)
         audioRecorderRef.current = null
       }
     }
-    setRecordingAudioClip(false)
   }
 
   async function continueToReview() {
     let finalAudio = audioMemo
-    const transcriptText =
-      captureMode === 'audio'
-        ? (audioNote.trim() || 'Spoken voice memo')
-        : finalRef.current.trim()
+    const transcriptText = finalRef.current.trim()
 
-    // If no raw audio was recorded directly, synthesize a soothing ambient memory audio
-    // so every memory has voice audio potion saved in IndexedDB
+    // If no raw audio was recorded, synthesize ambient memory audio
     if (!finalAudio && transcriptText) {
       try {
         const synthBlob = await createDemoAudioBlob(5)
@@ -302,7 +295,6 @@ export default function Capture() {
     interimRef.current = ''
     setFinalText('')
     setInterim('')
-    setAudioNote('')
     setError('')
     setNotice('')
     if (audioRecorderRef.current) {
@@ -326,11 +318,8 @@ export default function Capture() {
   }
 
   const remaining = Math.max(0, MAX_RECORDING_SECONDS - elapsed)
-  const warning = (listening || recordingAudioClip) && elapsed >= WARN_AT_SECONDS
-  const currentTranscript =
-    captureMode === 'audio'
-      ? audioNote.trim()
-      : (finalText + (interim ? ' ' + interim : '')).trim()
+  const warning = listening && elapsed >= WARN_AT_SECONDS
+  const currentTranscript = (finalText + (interim ? ' ' + interim : '')).trim()
   const hasTranscript = Boolean(currentTranscript)
 
   // Compute word count
@@ -354,279 +343,201 @@ export default function Capture() {
           <span className="user-name-text">
             {user?.name ? `${userDisplayName}’s Journal` : 'Personal Journal'}
           </span>
-          <span className="privacy-badge" title="Local to your device only">
-            🔒 Private
+          <span className="privacy-badge" title="Local & Cloud persistent storage">
+            🔒 Private · Cloud Synced
           </span>
         </div>
       </div>
 
       <h1 className="page-title">Capture today&rsquo;s memory</h1>
 
-      {/* Capture mode switcher: Live Voice Dictation vs Spoken Voice Memo */}
-      <div className="capture-mode-pills" role="tablist" aria-label="Capture Mode">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={captureMode === 'dictate'}
-          className={`capture-mode-pill ${captureMode === 'dictate' ? 'active' : ''}`}
-          onClick={() => {
-            if (listening || recordingAudioClip) stop()
-            setCaptureMode('dictate')
-          }}
-        >
-          🗣️ Voice Dictation
-        </button>
-        {audioRecordingSupported && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={captureMode === 'audio'}
-            className={`capture-mode-pill ${captureMode === 'audio' ? 'active' : ''}`}
-            onClick={() => {
-              if (listening || recordingAudioClip) stop()
-              setCaptureMode('audio')
-            }}
+      <div className="capture-lang-container">
+        <div className="field" style={{ maxWidth: 300, margin: '0 auto' }}>
+          <label htmlFor="capture-lang">Speaking in</label>
+          <select
+            id="capture-lang"
+            value={lang}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+            disabled={listening}
+            className="capture-lang-select"
           >
-            🎙️ Voice Memo
-          </button>
-        )}
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Quick-switch pills for fast language switching */}
+        <div className="lang-pills" role="radiogroup" aria-label="Quick language switch">
+          {POPULAR_LANGUAGES.map((code) => {
+            const isActive = lang === code
+            return (
+              <button
+                key={code}
+                type="button"
+                className={`lang-pill${isActive ? ' active' : ''}`}
+                onClick={() => handleLanguageChange(code)}
+                disabled={listening}
+                aria-checked={isActive}
+              >
+                {getLanguageShort(code)}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
-      {captureMode === 'dictate' && (
-        <>
-          {!speechSupported && (
-            <p className="notice" role="status">
-              Speech recognition isn&rsquo;t available in this browser. You can record a voice
-              memo using the 🎙️ Voice Memo tab or type your entry.
-            </p>
-          )}
+      <div className="mic-container">
+        <MicButton
+          listening={listening}
+          onClick={listening ? stop : start}
+          aria-describedby="mic-hint"
+        />
+        {/* Live visualizer bar feedback */}
+        <AudioVisualizer listening={listening} />
+      </div>
 
-          {speechSupported && (
-            <>
-              <div className="capture-lang-container">
-                <div className="field" style={{ maxWidth: 300, margin: '0 auto' }}>
-                  <label htmlFor="capture-lang">Speaking in</label>
-                  <select
-                    id="capture-lang"
-                    value={lang}
-                    onChange={(e) => handleLanguageChange(e.target.value)}
-                    disabled={listening || recordingAudioClip}
-                    className="capture-lang-select"
-                  >
-                    {LANGUAGES.map((l) => (
-                      <option key={l.code} value={l.code}>
-                        {l.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+      <p id="mic-hint" className="muted" style={{ margin: 0 }}>
+        {listening
+          ? `Recording in ${langObj.native || langObj.label}… tap to stop & transcribe`
+          : hasTranscript
+            ? 'Tap the mic for another take'
+            : 'Tap the mic and speak your thoughts'}
+      </p>
 
-                {/* Quick-switch pills for fast language switching */}
-                <div className="lang-pills" role="radiogroup" aria-label="Quick language switch">
-                  {POPULAR_LANGUAGES.map((code) => {
-                    const isActive = lang === code
-                    return (
-                      <button
-                        key={code}
-                        type="button"
-                        className={`lang-pill${isActive ? ' active' : ''}`}
-                        onClick={() => handleLanguageChange(code)}
-                        disabled={listening || recordingAudioClip}
-                        aria-checked={isActive}
-                      >
-                        {getLanguageShort(code)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="mic-container">
-                <MicButton
-                  listening={listening}
-                  onClick={listening ? stop : startDictation}
-                  aria-describedby="mic-hint"
-                />
-                {/* Live visualizer bar feedback */}
-                <AudioVisualizer listening={listening} />
-              </div>
-
-              <p id="mic-hint" className="muted" style={{ margin: 0 }}>
-                {listening
-                  ? `Listening in ${langObj.native || langObj.label}… tap to stop`
-                  : hasTranscript
-                    ? 'Tap the mic for another take'
-                    : 'Tap the mic and start speaking'}
-              </p>
-
-              <p
-                className={`timer${warning ? ' timer-warn' : ''}`}
-                aria-live={warning ? 'assertive' : 'off'}
-              >
-                {listening ? `${formatDuration(remaining)} left` : ''}
-              </p>
-              {warning && (
-                <p className="inline-error" role="alert" style={{ margin: 0 }}>
-                  Recording stops in {remaining}s
-                </p>
-              )}
-
-              {/* Live custom emojis with real-time mood reaction & floating burst particles */}
-              <LiveEmojis
-                selectedMood={mood}
-                onSelectMood={setMood}
-                liveText={finalText + ' ' + interim}
-                active={listening || hasTranscript}
-              />
-            </>
-          )}
-
-          {/* Live transcript area with metadata header and tools */}
-          <div className="transcript-wrapper">
-            <div className="transcript-header">
-              <div className="transcript-badge">
-                {mood && (
-                  <span className="live-mood-tag" title="Entry mood">
-                    {mood}
-                  </span>
-                )}
-                <span className="lang-indicator" title={langObj.label}>
-                  🗣️ {langObj.native || langObj.label}
-                </span>
-                {wordCount > 0 && (
-                  <span className="word-count-badge">
-                    · {wordCount} {wordCount === 1 ? 'word' : 'words'}
-                  </span>
-                )}
-              </div>
-
-              {hasTranscript && !listening && !recordingAudioClip && (
-                <div className="transcript-actions">
-                  <button
-                    type="button"
-                    className="btn-transcript-tool"
-                    onClick={copyTranscript}
-                    title="Copy transcript"
-                    aria-label="Copy transcript"
-                  >
-                    {copied ? '✓ Copied' : 'Copy'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-transcript-tool btn-transcript-clear"
-                    onClick={clearTranscript}
-                    title="Clear transcript"
-                    aria-label="Clear transcript"
-                  >
-                    Clear
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="transcript-box" aria-live="polite" dir={rtlDirection}>
-              {finalText || interim ? (
-                <>
-                  {finalText}
-                  {interim && (
-                    <span className="transcript-interim">
-                      {finalText ? ' ' : ''}
-                      {interim}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span className="placeholder">
-                  {listening
-                    ? `Listening in ${langObj.native || langObj.label}… speak your day`
-                    : 'Your transcript will appear here.'}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Optional Voice Recording Clip action for Dictation mode */}
-          {audioRecordingSupported && !listening && (
-            <div style={{ margin: '0.4rem auto', textAlign: 'center' }}>
-              {!audioMemo && !recordingAudioClip && hasTranscript && (
-                <button
-                  type="button"
-                  className="btn-voice-clip"
-                  onClick={startVoiceClip}
-                  title="Attach your real voice audio memo alongside text"
-                >
-                  🎙️ Record voice clip for this memory
-                </button>
-              )}
-              {recordingAudioClip && (
-                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
-                  <button
-                    type="button"
-                    className="btn-voice-clip recording"
-                    onClick={stopVoiceClip}
-                  >
-                    ⏹️ Stop recording voice clip ({formatDuration(remaining)} left)
-                  </button>
-                  <AudioVisualizer listening={true} />
-                </div>
-              )}
-            </div>
-          )}
-        </>
+      <p
+        className={`timer${warning ? ' timer-warn' : ''}`}
+        aria-live={warning ? 'assertive' : 'off'}
+      >
+        {listening ? `${formatDuration(remaining)} left` : ''}
+      </p>
+      {warning && (
+        <p className="inline-error" role="alert" style={{ margin: 0 }}>
+          Recording stops in {remaining}s
+        </p>
       )}
 
-      {/* Dedicated Voice Memo Audio Mode */}
-      {captureMode === 'audio' && (
-        <div className="audio-capture-pane" style={{ width: '100%', maxWidth: 440, margin: '0 auto' }}>
-          <div className="mic-container">
-            <MicButton
-              listening={listening}
-              onClick={listening ? stop : startAudioMemo}
-              aria-describedby="audio-mic-hint"
-            />
-            <AudioVisualizer listening={listening} />
-          </div>
-
-          <p id="audio-mic-hint" className="muted" style={{ textAlign: 'center', margin: '0.5rem 0' }}>
-            {listening
-              ? 'Recording your voice memo… tap to finish'
-              : audioMemo
-                ? 'Voice memo recorded! Tap to record another take'
-                : 'Tap the mic and speak your thoughts'}
-          </p>
-
-          <p
-            className={`timer${warning ? ' timer-warn' : ''}`}
-            aria-live={warning ? 'assertive' : 'off'}
-            style={{ textAlign: 'center' }}
-          >
-            {listening ? `${formatDuration(remaining)} left` : ''}
-          </p>
-
-          <LiveEmojis
-            selectedMood={mood}
-            onSelectMood={setMood}
-            liveText={audioNote}
-            active={listening || Boolean(audioMemo)}
-          />
-
-          <div className="field" style={{ marginTop: '1rem' }}>
-            <label htmlFor="audio-notes">Notes or summary (optional)</label>
-            <textarea
-              id="audio-notes"
-              value={audioNote}
-              onChange={(e) => setAudioNote(e.target.value)}
-              placeholder="Jot down highlights, keywords, or feelings from this voice memo…"
-              rows={3}
-              style={{ minHeight: '80px' }}
-            />
-          </div>
+      {/* AI Transcribing in progress banner */}
+      {transcribing && (
+        <div className="transcribing-banner" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <span>⚡ Transcribing your voice with AI Whisper…</span>
         </div>
       )}
 
+      {/* Live custom emojis with real-time mood reaction & floating burst particles */}
+      <LiveEmojis
+        selectedMood={mood}
+        onSelectMood={setMood}
+        liveText={finalText + ' ' + interim}
+        active={listening || hasTranscript}
+      />
+
+      {/* Live transcript area with metadata header and tools */}
+      <div className="transcript-wrapper">
+        <div className="transcript-header">
+          <div className="transcript-badge">
+            {mood && (
+              <span className="live-mood-tag" title="Entry mood">
+                {mood}
+              </span>
+            )}
+            <span className="lang-indicator" title={langObj.label}>
+              🗣️ {langObj.native || langObj.label}
+            </span>
+            {wordCount > 0 && (
+              <span className="word-count-badge">
+                · {wordCount} {wordCount === 1 ? 'word' : 'words'}
+              </span>
+            )}
+          </div>
+
+          <div className="transcript-actions">
+            {audioMemo && !listening && (
+              <button
+                type="button"
+                className="btn-transcribe-ai"
+                onClick={() => transcribeVoiceMemo()}
+                disabled={transcribing}
+                title="Transcribe or re-transcribe voice memo with AI Whisper"
+              >
+                ⚡ AI Transcribe
+              </button>
+            )}
+            {hasTranscript && !listening && (
+              <>
+                <button
+                  type="button"
+                  className="btn-transcript-tool"
+                  onClick={() => setIsEditingText(!isEditingText)}
+                  title={isEditingText ? 'Done editing' : 'Edit transcript'}
+                >
+                  {isEditingText ? '✓ Done' : 'Edit'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-transcript-tool"
+                  onClick={copyTranscript}
+                  title="Copy transcript"
+                  aria-label="Copy transcript"
+                >
+                  {copied ? '✓ Copied' : 'Copy'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-transcript-tool btn-transcript-clear"
+                  onClick={clearTranscript}
+                  title="Clear transcript"
+                  aria-label="Clear transcript"
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {isEditingText ? (
+          <textarea
+            className="transcript-box transcript-editable"
+            value={finalText}
+            onChange={(e) => {
+              setFinalText(e.target.value)
+              finalRef.current = e.target.value
+            }}
+            placeholder="Edit or type your entry here…"
+            dir={rtlDirection}
+            rows={5}
+            style={{ width: '100%', resize: 'vertical' }}
+          />
+        ) : (
+          <div className="transcript-box" aria-live="polite" dir={rtlDirection}>
+            {finalText || interim ? (
+              <>
+                {finalText}
+                {interim && (
+                  <span className="transcript-interim">
+                    {finalText ? ' ' : ''}
+                    {interim}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="placeholder">
+                {listening
+                  ? `Listening & recording in ${langObj.native || langObj.label}… speak your day`
+                  : 'Your transcript will appear here automatically when you speak.'}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Audio memo preview if voice was recorded */}
-      {audioMemo && !listening && !recordingAudioClip && (
-        <div style={{ width: '100%', maxWidth: '420px', margin: '0.5rem auto' }}>
+      {audioMemo && !listening && (
+        <div style={{ width: '100%', maxWidth: '440px', margin: '0.6rem auto' }}>
           <AudioPlayer
             audio={audioMemo}
             title="Spoken voice memo"
@@ -646,7 +557,7 @@ export default function Capture() {
         </p>
       )}
 
-      {(hasTranscript || Boolean(audioMemo)) && !listening && !recordingAudioClip && (
+      {(hasTranscript || Boolean(audioMemo)) && !listening && (
         <button
           type="button"
           className="btn btn-primary"

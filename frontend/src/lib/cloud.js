@@ -165,3 +165,41 @@ export async function deleteEntryFromCloud(id) {
     return false
   }
 }
+
+/**
+ * Transcribe a voice audio Blob using Cloudflare Workers AI Whisper model
+ * Supports multilingual transcription (Malayalam, English, Hindi, Tamil, etc.)
+ */
+export async function transcribeAudioBlob(audioBlob, language = 'en-US') {
+  if (!audioBlob) return ''
+  const baseUrl = getWorkerBaseUrl()
+  const base64 = await blobToBase64(audioBlob)
+  if (!base64) return ''
+
+  try {
+    const res = await fetch(`${baseUrl}/api/transcribe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Language': language,
+      },
+      body: JSON.stringify({
+        audio_base64: base64,
+        language,
+      }),
+    })
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      console.warn('Transcription response notice:', errData.error)
+      return ''
+    }
+
+    const data = await res.json()
+    return (data.text || '').trim()
+  } catch (err) {
+    console.warn('AI Whisper transcription note:', err.message)
+    return ''
+  }
+}
+

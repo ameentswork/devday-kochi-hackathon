@@ -15,7 +15,7 @@ devday-kochi-hackathon/
       main.jsx         mount + HashRouter + styles import
       App.jsx          providers, layout, routes, tab bar
       styles/app.css   design tokens + all styles
-      lib/             db.js, speech.js, audioRecorder.js, photos.js, format.js,
+      lib/             db.js, cloud.js, speech.js, audioRecorder.js, photos.js, format.js,
                        limits.js, illustration.js, demo.js (canvas-drawn seed entries)
       state/           DraftContext.jsx (Capture → Review draft with audio)
       screens/         Auth, Home, Capture, Review, Memories, Detail, Settings
@@ -24,9 +24,11 @@ devday-kochi-hackathon/
   backend/             Express server (production serving + future API)
     server.js          static dist/ hosting, SPA fallback, /api/health
     package.json
-  worker/              Cloudflare Worker — all AI access goes through here
-    wrangler.toml      Workers AI binding: AI
-    src/index.js       POST /api/prompt, POST /api/image, 8 KB cap, daily cap
+  worker/              Cloudflare Worker — AI access, D1 database & R2 audio storage
+    wrangler.toml      Workers AI binding: AI; D1: voice-diary-db; R2: voice-diary-audio
+    src/index.js       POST /api/prompt, POST /api/image, POST /api/transcribe, D1 & R2 endpoints
+    schema.sql         D1 table schema: diary_entries
+    migration_001.sql  D1 column migrations
     package.json       wrangler (dev dep)
   package.json         orchestration scripts (dev, build, start, install:all)
   SPEC.md  STACK.md  AGENTS.md  README.md
@@ -38,10 +40,11 @@ devday-kochi-hackathon/
 |---|---|---|---|
 | UI | React (JavaScript, `.jsx`) | 19.3.x | Function components + hooks; plain JS because the Web Speech API has no built-in types |
 | Routing | `react-router-dom`, `HashRouter` | 7.18.x | Hash URLs need no rewrite rules on any static host |
-| Storage | IndexedDB via `idb` | 8.0.x | Promise wrapper; survives browser restarts; stores Blobs (photos + voice memos) natively |
-| Speech | Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`) | browser | Native BCP-47 binding (`ml-IN` for Malayalam, `en-US` for English, etc.); preserves raw script without translation or transliteration; non-fatal silence and clean abort suppression |
+| Storage | IndexedDB via `idb` | 8.0.x | Promise wrapper; survives browser restarts; stores Blobs (photos + voice memos) natively; offline-first cache |
+| Cloud Storage & Sync | Cloudflare D1 + R2 via `src/lib/cloud.js` | — | Background syncs diary text & metadata to D1 (`voice-diary-db`) and voice memos to R2 (`voice-diary-audio`); hydrates on app open/refresh |
+| Speech & Dictation | Web Speech API + Workers AI Whisper | browser / CF AI | Dual-pipeline: browser-native real-time dictation with automatic fallback to `@cf/openai/whisper` whenever speech recognition is silent or unsupported |
 | Voice Memo Recorder | `MediaRecorder` + Web Audio API | browser | Simultaneous voice capture during dictation; encodes `audio/webm` (or `audio/wav`), tracked with duration and saved as Blob |
-| Voice Memo Player | Custom `AudioPlayer.jsx` component | — | Play/pause, scrubbing slider, time indicators, live bouncing visualizer bars, download option |
+| Voice Memo Player | Custom `AudioPlayer.jsx` component | — | Play/pause, scrubbing slider, time indicators, live bouncing visualizer bars, download option, supports both local Blobs and remote R2 URLs |
 | Audio Visualizer | Web Audio API (`AudioContext`, `AnalyserNode`) | browser | Zero-dependency live waveform equalizer feedback during active microphone recording |
 | Photos | `<input type="file" accept="image/*" multiple>` + canvas resize | browser | Gallery/camera on Android; max 1280 px, JPEG q0.8, stored as Blob |
 | Styling | Hand-written CSS, one file: `src/styles/app.css` | — | Design tokens as CSS variables; no UI kit |
@@ -57,13 +60,16 @@ devday-kochi-hackathon/
 | Frontend auth | `src/lib/api.js` + `src/state/AuthContext.jsx` | — | Token + uid in localStorage; `App.jsx` gates the app and routes admins to the admin dashboard; Vite dev proxy maps `/api` → `localhost:3000` |
 | Tests | `node:test` (built-in) | — | `backend/test/auth.test.js`, 8 cases: roles, status, session lifecycle, stats, self-protection |
 
-## AI / illustration stack
+## AI / illustration & transcription stack
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Gateway | Cloudflare Worker (`worker/`) + Local/Render Fallback | Dual-environment: Cloudflare Worker AI (Llama 3.1 + Flux 1) with seamless local watercolor canvas generator fallback when worker is offline or on Render without worker config |
+| Gateway | Cloudflare Worker (`worker/`) + Local/Render Fallback | Dual-environment: Cloudflare Worker AI (Llama 3.1 + Flux 1 + Whisper) with D1 database and R2 audio storage |
+| Transcription model | `@cf/openai/whisper` | Fast, GPU-accelerated speech-to-text in native scripts (Malayalam, English, Hindi, etc.) for recorded voice memos |
 | Prompt model | `@cf/meta/llama-3.1-8b-instruct` | Turns the transcript into a ≤60-word English image prompt |
 | Image model | `@cf/black-forest-labs/flux-1-schnell` | Watercolour illustration → PNG bytes |
+| Database | Cloudflare D1 (`voice-diary-db`) | Serverless SQLite database for permanent diary persistence across deployments |
+| Object storage | Cloudflare R2 (`voice-diary-audio`) | Private audio object storage for high-fidelity voice memos with authenticated streaming |
 | Tooling | `wrangler` 4.x (local dev dep) | `npx wrangler dev --remote` — AI bindings only run in the cloud |
 | Frontend client | `src/lib/illustration.js` | `VITE_WORKER_URL` env (default `http://localhost:8787`), with automatic watercolor fallback |
 | Limits | `src/lib/limits.js` | 1000-char prompt input (daily illustration and regeneration limits removed for testing) |

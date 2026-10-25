@@ -87,6 +87,8 @@ Member tabs: Home, Capture, Memories, Settings; Admin tabs: Dashboard, Members, 
 | 23 | Live emojis react to spoken thoughts in real-time or via one-tap reaction pills with floating particle micro-animations, persist to IndexedDB, and display on entry cards and detail view | ✅ |
 | 24 | Logging in or signing up as a member navigates directly to #/capture, displaying the user's personal identity badge; draft state and language preferences are completely isolated between users, and the Capture tab is accessible in the member navigation bar while admins are blocked from member diary views | ✅ |
 | 25 | Selecting Malayalam (or any supported language) transcribes in that language's native script without forcibly resetting to English; every recording take saves the raw microphone audio as a voice memo in IndexedDB, and the audio can be played back in Review, Memories, and Detail view | ✅ |
+| 26 | Diary entries and metadata persist permanently in Cloudflare D1 (`voice-diary-db`) and voice audio memos in Cloudflare R2 (`voice-diary-audio`); entries hydrate from cloud on app open or refresh, with local IndexedDB retained as an offline-first fallback | ✅ |
+| 27 | Recorded voice audio automatically transcribes to text via Cloudflare Workers AI Whisper (`@cf/openai/whisper`) if browser speech recognition is silent or empty, guaranteeing fast, accurate voice-to-text in native script across all platforms | ✅ |
 
 ## Design
 

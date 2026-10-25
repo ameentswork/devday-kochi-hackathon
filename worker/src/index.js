@@ -10,6 +10,7 @@ const PROMPT_MAX_CHARS = 1000
 
 const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
 const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell'
+const WHISPER_MODEL = '@cf/openai/whisper'
 
 const STYLE =
   'soft watercolour illustration, warm ivory and forest-green palette, ' +
@@ -18,7 +19,7 @@ const STYLE =
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Id',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Id, X-Language',
 }
 
 function json(data, status = 200) {
@@ -41,6 +42,51 @@ async function readJson(request) {
     return JSON.parse(text)
   } catch {
     throw httpError(400, 'Body must be valid JSON')
+  }
+}
+
+// ---------- Voice-to-Text Transcription via Workers AI Whisper ----------
+
+async function handleTranscribe(request, env) {
+  if (!env.AI) throw httpError(500, 'Workers AI binding "AI" is not configured')
+
+  let audioBytes = null
+  let language = ''
+
+  const contentType = request.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    const body = await readJson(request)
+    if (!body.audio_base64) throw httpError(400, 'audio_base64 is required')
+    language = body.language || ''
+    const binaryString = atob(body.audio_base64)
+    audioBytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      audioBytes[i] = binaryString.charCodeAt(i)
+    }
+  } else {
+    const buf = await request.arrayBuffer()
+    if (!buf || buf.byteLength === 0) throw httpError(400, 'Audio stream is empty')
+    audioBytes = new Uint8Array(buf)
+    language = request.headers.get('x-language') || ''
+  }
+
+  const input = {
+    audio: [...audioBytes],
+  }
+  if (language) {
+    const shortLang = language.split('-')[0].toLowerCase()
+    input.language = shortLang
+  }
+
+  try {
+    const out = await env.AI.run(WHISPER_MODEL, input)
+    const text = (out?.text || '').trim()
+    return json({ text, vtt: out?.vtt || null, word_count: out?.word_count || 0 })
+  } catch (err) {
+    if (err.message && err.message.includes('no speech could be extracted')) {
+      return json({ text: '', empty: true, message: 'No audible speech detected.' })
+    }
+    throw err
   }
 }
 
@@ -324,7 +370,10 @@ export default {
     const pathname = url.pathname
 
     try {
-      // AI Illustration Generation endpoints
+      // AI Transcription & Illustration Generation endpoints
+      if (request.method === 'POST' && pathname === '/api/transcribe') {
+        return await handleTranscribe(request, env)
+      }
       if (request.method === 'POST' && pathname === '/api/prompt') {
         return await handlePrompt(request, env)
       }
