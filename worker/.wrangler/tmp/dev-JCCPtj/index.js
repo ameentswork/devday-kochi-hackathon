@@ -4,7 +4,8 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 // src/index.js
 var MAX_BODY_BYTES = 12 * 1024 * 1024;
 var PROMPT_MAX_CHARS = 1e3;
-var CHAT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+var CHAT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+var FALLBACK_CHAT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 var IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
 var WHISPER_MODEL = "@cf/openai/whisper";
 var STYLE = "soft watercolour illustration, warm ivory and forest-green palette, gentle light, calm journal mood, no text, no logos, no recognisable real people";
@@ -105,8 +106,15 @@ Diary entry:
 ${transcript.slice(0, PROMPT_MAX_CHARS)}`
     }
   ];
-  const out = await env.AI.run(CHAT_MODEL, { messages, max_tokens: 120 });
-  const prompt = (out?.response || "").trim().split("\n")[0].trim().slice(0, 500);
+  let out;
+  try {
+    out = await env.AI.run(CHAT_MODEL, { messages, max_tokens: 120 });
+  } catch (err) {
+    console.warn(`Primary model ${CHAT_MODEL} failed, attempting ${FALLBACK_CHAT_MODEL}:`, err?.message || err);
+    out = await env.AI.run(FALLBACK_CHAT_MODEL, { messages, max_tokens: 120 });
+  }
+  const rawText = out?.response || out?.result?.response || (typeof out === "string" ? out : "");
+  const prompt = (rawText || "").trim().split("\n")[0].trim().slice(0, 500);
   if (!prompt) throw httpError(502, "The model returned an empty prompt");
   return json({ prompt });
 }
@@ -333,39 +341,9 @@ var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
 
-// node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
-function reduceError(e) {
-  return {
-    name: e?.name,
-    message: e?.message ?? String(e),
-    stack: e?.stack,
-    cause: e?.cause === void 0 ? void 0 : reduceError(e.cause)
-  };
-}
-__name(reduceError, "reduceError");
-var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
-  try {
-    return await middlewareCtx.next(request, env);
-  } catch (e) {
-    const error = reduceError(e);
-    const body = JSON.stringify(error);
-    const headers = {
-      "Content-Type": "application/json",
-      "MF-Experimental-Error-Stack": "true"
-    };
-    const encoded = encodeURIComponent(body);
-    if (encoded.length <= 8192) {
-      headers["MF-Experimental-Error-Stack-Payload"] = encoded;
-    }
-    return new Response(body, { status: 500, headers });
-  }
-}, "jsonError");
-var middleware_miniflare3_json_error_default = jsonError;
-
-// .wrangler/tmp/bundle-V6DdhS/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-1K0gVc/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
-  middleware_ensure_req_body_drained_default,
-  middleware_miniflare3_json_error_default
+  middleware_ensure_req_body_drained_default
 ];
 var middleware_insertion_facade_default = src_default;
 
@@ -394,7 +372,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-V6DdhS/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-1K0gVc/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

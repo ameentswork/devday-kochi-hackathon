@@ -328,6 +328,23 @@ if (WORKER_URL) {
       res.status(502).json({ error: 'Worker proxy failed' })
     }
   })
+
+  app.post('/api/transcribe', async (req, res) => {
+    try {
+      const resp = await fetch(`${WORKER_URL}/api/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': req.headers['content-type'] || 'application/json',
+          'X-Language': req.headers['x-language'] || '',
+        },
+        body: JSON.stringify(req.body),
+      })
+      const data = await resp.json()
+      res.status(resp.status).json(data)
+    } catch {
+      res.status(502).json({ error: 'Worker proxy failed' })
+    }
+  })
 }
 
 // Serve the built frontend (production). Diary data stays client-side.

@@ -8,7 +8,8 @@
 const MAX_BODY_BYTES = 12 * 1024 * 1024 // 12 MB to comfortably support audio memos
 const PROMPT_MAX_CHARS = 1000
 
-const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
+const CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct'
+const FALLBACK_CHAT_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
 const IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell'
 const WHISPER_MODEL = '@cf/openai/whisper'
 
@@ -133,8 +134,15 @@ async function handlePrompt(request, env) {
     },
   ]
 
-  const out = await env.AI.run(CHAT_MODEL, { messages, max_tokens: 120 })
-  const prompt = (out?.response || '').trim().split('\n')[0].trim().slice(0, 500)
+  let out
+  try {
+    out = await env.AI.run(CHAT_MODEL, { messages, max_tokens: 120 })
+  } catch (err) {
+    console.warn(`Primary model ${CHAT_MODEL} failed, attempting ${FALLBACK_CHAT_MODEL}:`, err?.message || err)
+    out = await env.AI.run(FALLBACK_CHAT_MODEL, { messages, max_tokens: 120 })
+  }
+  const rawText = out?.response || out?.result?.response || (typeof out === 'string' ? out : '')
+  const prompt = (rawText || '').trim().split('\n')[0].trim().slice(0, 500)
   if (!prompt) throw httpError(502, 'The model returned an empty prompt')
   return json({ prompt })
 }

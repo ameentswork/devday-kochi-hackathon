@@ -35,7 +35,7 @@ export async function generateIllustration(transcript, language) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcript: cleanTranscript, language }),
-      }, 4000)
+      }, 15000)
 
       if (promptRes.ok) {
         const { prompt } = await promptRes.json()
@@ -44,7 +44,7 @@ export async function generateIllustration(transcript, language) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt }),
-          }, 8000)
+          }, 30000)
 
           if (imgRes.ok) {
             const blob = await imgRes.blob()
